@@ -18,6 +18,9 @@ substDB j n i@(Idx x) = i
 substDB j n (t1 :@: t2) = (substDB j n t1) :@: (substDB j n t2)
 substDB j n (Lmb t) = Lmb $ substDB (j+1) (shift 1 n) t
 
+betaRuleDB :: Term -> Term
+betaRuleDB (Lmb t :@: s) = shift (-1) $ substDB 0 (shift 1 s) t
+
 main :: IO ()
 main = do
   let t1 = Lmb $ (Idx 0) :@: (Idx 1 :@: Idx 2)
