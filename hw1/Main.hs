@@ -21,6 +21,30 @@ substDB j n (Lmb t) = Lmb $ substDB (j+1) (shift 1 n) t
 betaRuleDB :: Term -> Term
 betaRuleDB (Lmb t :@: s) = shift (-1) $ substDB 0 (shift 1 s) t
 
+oneStepDBN :: Term -> Maybe Term
+oneStepDBN (Idx _) = Nothing
+oneStepDBN (l@(Lmb _) :@: r) = Just $ betaRuleDB (l :@: r)
+oneStepDBN (a :@: b) = case oneStepDBN a of
+                        Nothing -> case oneStepDBN b of 
+                          Nothing -> Nothing
+                          Just exp -> Just $ a :@: exp
+                        Just exp -> Just $ exp :@: b
+oneStepDBN (Lmb body) = do res <- oneStepDBN body
+                           return $ Lmb res
+
+oneStepDBA :: Term -> Maybe Term
+oneStepDBA (Idx _) = Nothing
+oneStepDBA (l@(Lmb _) :@: r) = case oneStepDBA r of
+                        Nothing -> Just $ betaRuleDB (l :@: r)
+                        Just exp -> Just $ l :@: exp
+oneStepDBA (a :@: b) = case oneStepDBA b of
+                        Nothing -> case oneStepDBA a of 
+                          Nothing -> Nothing
+                          Just exp -> Just $ exp :@: b
+                        Just exp -> Just $ a :@: exp
+oneStepDBA (Lmb body) = do res <- oneStepDBA body
+                           return $ Lmb res
+
 main :: IO ()
 main = do
   let t1 = Lmb $ (Idx 0) :@: (Idx 1 :@: Idx 2)
