@@ -45,6 +45,11 @@ oneStepDBA (a :@: b) = case oneStepDBA b of
 oneStepDBA (Lmb body) = do res <- oneStepDBA body
                            return $ Lmb res
 
+nfDB :: (Term -> Maybe Term) -> Term -> Term 
+nfDB f t = case f t of
+              Just x -> nfDB f x
+              Nothing -> t
+
 main :: IO ()
 main = do
   let t1 = Lmb $ (Idx 0) :@: (Idx 1 :@: Idx 2)
