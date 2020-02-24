@@ -75,3 +75,35 @@ whnf :: Term -> Term
 whnf u = case oneStep u of 
             Just u' -> whnf u'
             Nothing -> u
+
+
+infer :: Env -> Term -> Maybe Type
+infer env t = inferHelper env t 0
+
+inferHelper :: Env -> Term -> Int -> Maybe Type
+inferHelper (Env env) (Idx x) depth = return $ snd $ env !! x
+inferHelper env Tru depth = return $ Boo
+inferHelper env Fls depth = return $ Boo
+inferHelper env (If t1 t2 t3) depth = do
+                      t1Type <- inferHelper env t1 depth
+                      case t1Type of 
+                        Boo ->  do t2Type <- inferHelper env t2 depth
+                                   t3Type <- inferHelper env t3 depth
+                                   if t2Type == t3Type then 
+                                    return $ t2Type
+                                   else
+                                    Nothing
+                        _ -> Nothing
+inferHelper (Env env) (Lmb sym t term) depth = do termType <- inferHelper (Env $ (sym, t):env) term (depth+1)
+                                                  return $ t :-> termType
+inferHelper env (t1 :@: t2) depth = do leftType <- inferHelper env t1 depth
+                                       rightType <- inferHelper env t2 depth
+                                       case leftType of
+                                          (l :-> r) -> if l /= rightType then
+                                                        Nothing
+                                                      else
+                                                        return $ r
+                                          _ -> Nothing
+
+infer0 :: Term -> Maybe Type
+infer0 = infer $ Env []
