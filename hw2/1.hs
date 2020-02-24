@@ -4,6 +4,7 @@ infixr 3 :->
 
 data Type = Boo
           | Type :-> Type
+          | Type :* Type
     deriving (Read,Show,Eq)
 
 data Term = Fls
@@ -12,6 +13,9 @@ data Term = Fls
           | Idx Int
           | Term :@: Term
           | Lmb Symb Type Term
+          | Pair Term Term
+          | Fst Term
+          | Snd Term
           | Let Symb Term Term deriving (Show)
 
 instance Eq Term where
@@ -40,6 +44,11 @@ shift val t = go 0 val t where
     go cutOff val (t1 :@: t2) = (go cutOff val t1) :@: (go cutOff val t2)
     go cutOff val (Lmb sym t term) = Lmb sym t newBody where 
                                        newBody = go (cutOff + 1) val term
+    go cutOff val (Pair fi se) = Pair newFi newSe where
+                                  newFi = go cutOff val fi
+                                  newSe = go cutOff val se
+    go cutOff val (Fst term) = Fst $ go cutOff val term
+    go cutOff val (Snd term) = Snd $ go cutOff val term
 
 substDB :: Int -> Term -> Term -> Term
 substDB _ _ Fls = Fls
@@ -55,11 +64,17 @@ substDB j n (Lmb sym t term) = Lmb sym t newBody where
                                 newBody = substDB (j+1) (shift 1 n) term
 substDB j n (Let sym t term) = Let sym t newBody where
                                 newBody = substDB (j+1) (shift 1 n) term
+substDB j n (Pair t1 t2) = Pair newT1 newT2 where
+                              newT1 = substDB j n t1
+                              newT2 = substDB j n t2                              
+substDB j n (Fst t) = Fst $ substDB j n t
+substDB j n (Snd t) = Snd $ substDB j n t
 
 isValue :: Term -> Bool
 isValue Tru = True
 isValue Fls = True
 isValue (Lmb _ _ _) = True
+isValue (Pair u v) | isValue u && isValue v = True
 isValue _ = False
 
 oneStep :: Term -> Maybe Term
@@ -75,6 +90,17 @@ oneStep (l :@: r) = do l' <- oneStep l
 oneStep (Let sym t term) | isValue t = return $ substDB 0 t term
 oneStep (Let sym t term) = do t' <- oneStep t
                               return $ Let sym t' term
+oneStep (Fst p@(Pair u v)) | isValue p = return $ u
+oneStep (Snd p@(Pair u v)) | isValue p = return $ v
+oneStep (Fst t) = do t' <- oneStep t
+                     return $ Fst t'
+oneStep (Snd t) = do t' <- oneStep t
+                     return $ Snd t'
+oneStep (Pair u v) = case oneStep u of
+                      Just u' -> Just $ Pair u' v
+                      Nothing -> case oneStep v of
+                        Just v' -> Just $ Pair u v'
+                        _ -> Nothing
 oneStep _ = Nothing
 
 whnf :: Term -> Term 
@@ -113,6 +139,31 @@ inferHelper env (t1 :@: t2) depth = do leftType <- inferHelper env t1 depth
                                                       else
                                                         return $ r
                                           _ -> Nothing
+inferHelper env (Pair u v) depth = do uType <- inferHelper env u depth
+                                      vType <- inferHelper env v depth
+                                      return $ uType :* vType
+inferHelper env (Fst t) depth = do tType <- inferHelper env t depth                              
+                                   case tType of 
+                                     (t1 :* _) -> Just t1
+                                     _ -> Nothing
+inferHelper env (Snd t) depth = do tType <- inferHelper env t depth                              
+                                   case tType of 
+                                     (_ :* t2) -> Just t2
+                                     _ -> Nothing
+                                   
 
 infer0 :: Term -> Maybe Type
 infer0 = infer $ Env []
+
+main1 :: IO ()
+main1 = do let cSnd = Lmb "z" (Boo :* Boo) (Snd (Idx 0));
+           let cCurry = Lmb "f" (Boo :* Boo :-> Boo) $ Lmb "x" Boo $ Lmb "y" Boo $ (Idx 2) :@: Pair (Idx 1) (Idx 0);
+           putStrLn $ show $ whnf (cCurry :@: cSnd :@: Fls :@: Tru)
+           putStrLn $ show $ whnf (cCurry :@: cSnd :@: Fls)
+
+main2 :: IO ()
+main2 = do let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1));
+           let cUnCurry = Lmb "f" (Boo :-> Boo :-> Boo) $ Lmb "z" (Boo :* Boo) $ (Idx 1) :@: Fst (Idx 0) :@: Snd (Idx 0);
+           putStrLn $ show $ infer0 (cUnCurry :@: cK)
+           putStrLn $ show $ infer0 (cUnCurry :@: cK :@: Pair Fls Tru)
+           putStrLn $ show $ infer0 (cUnCurry :@: cK :@: Fls)
