@@ -140,9 +140,9 @@ infer env (If t1 t2 t3) = do
                         _ -> Nothing
 infer (Env env) (Lmb sym t term) = do termType <- infer (Env $ (sym, t):env) term
                                       return $ t :-> termType
--- infer e@(Env env) (Let p t term) = do   tType <- infer e t
-                                        -- termType <- infer (Env $ (sym, tType):env) term
-                                        -- return $ termType
+infer e@(Env env) (Let p t term) = do tType <- infer e t
+                                      (Env newEnv) <- checkPat p tType
+                                      infer (Env $ newEnv ++ env) term
 infer env (t1 :@: t2) = do  leftType <- infer env t1
                             rightType <- infer env t2
                             case leftType of
@@ -174,6 +174,13 @@ match (PPair l r) (Pair u v) = do lMatch <- (match l u)
                                   return $ lMatch ++ rMatch
 match _ _ = Nothing
 
+
+checkPat :: Pat -> Type -> Maybe Env
+checkPat (PVar s) t = return $ Env $ [(s, t)]
+checkPat (PPair u v) (t1 :* t2) = do (Env uCheck) <- checkPat u t1
+                                     (Env vCheck) <- checkPat v t2
+                                     return $ Env $ (vCheck ++ uCheck)
+
 main1 :: IO ()
 main1 = do let cSnd = Lmb "z" (Boo :* Boo) (Snd (Idx 0));
            let cCurry = Lmb "f" (Boo :* Boo :-> Boo) $ Lmb "x" Boo $ Lmb "y" Boo $ (Idx 2) :@: Pair (Idx 1) (Idx 0);
@@ -198,3 +205,15 @@ main3 = do let test2 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 2);
            putStrLn $ show $ oneStep test0
            let test1 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 1);
            putStrLn $ show $ oneStep test1
+
+main4 :: IO ()
+main4 = do let [pa,pb] = PVar <$> ["a","b"];
+           let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1));
+           let cUnCurry' = Lmb "f" (Boo :-> Boo :-> Boo) $ Lmb "z" (Boo :* Boo) $ Let (PPair (PVar "x") (PVar "y")) (Idx 0) $ Idx 3 :@: Idx 1 :@: Idx 0;
+           putStrLn $ show $ infer0 cUnCurry'
+           putStrLn $ show $ infer0 (cUnCurry' :@: cK)
+           putStrLn $ show $ infer0 (cUnCurry' :@: cK :@: Pair Fls Tru)
+           putStrLn $ show $ infer0 (cUnCurry' :@: cK :@: Fls)
+           let pair  = Pair Tru cK;
+           let ppair = PPair pa pb;
+           putStrLn $ show $ infer0 $ Let ppair pair (Idx 0);
