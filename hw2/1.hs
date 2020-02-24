@@ -156,9 +156,26 @@ whnf u = case oneStep u of
 
 
 infer :: Env -> Term -> Maybe Type
+infer _ Zero = return $ Nat
 infer (Env env) (Idx x) = return $ snd $ env !! x
 infer env Tru = return $ Boo
 infer env Fls = return $ Boo
+infer env (Succ t) = do tType <- infer env t
+                        case tType of
+                          Nat -> Just Nat
+                          _ -> Nothing
+infer env (Pred t) = do tType <- infer env t
+                        case tType of
+                          Nat -> Just Nat
+                          _ -> Nothing
+infer env (IsZero t) = do tType <- infer env t
+                          case tType of
+                            Nat -> Just Boo
+                            _ -> Nothing
+infer env (Fix t) = do tType <- infer env t
+                       case tType of 
+                         (t1 :-> t2) | t1 == t2 -> Just t1
+                         _ -> Nothing
 infer env (If t1 t2 t3) = do
                       t1Type <- infer env t1
                       case t1Type of 
@@ -302,3 +319,4 @@ main5 = do let test = minus :@: (power :@: nine :@: two) :@: (mult :@: eight :@:
            putStrLn $ show $ whnf test
            putStrLn $ show $ whnf $ eq :@: test :@: one
            putStrLn $ show $ whnf $ IsZero (Succ (Pred Fls))
+           putStrLn $ show $ infer0 (Lmb "f" (Nat :-> Nat) $ Fix $ Idx 0)
