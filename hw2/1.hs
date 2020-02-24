@@ -110,47 +110,43 @@ whnf u = case oneStep u of
 
 
 infer :: Env -> Term -> Maybe Type
-infer env t = inferHelper env t 0
-
-inferHelper :: Env -> Term -> Int -> Maybe Type
-inferHelper (Env env) (Idx x) depth = return $ snd $ env !! x
-inferHelper env Tru depth = return $ Boo
-inferHelper env Fls depth = return $ Boo
-inferHelper env (If t1 t2 t3) depth = do
-                      t1Type <- inferHelper env t1 depth
+infer (Env env) (Idx x) = return $ snd $ env !! x
+infer env Tru = return $ Boo
+infer env Fls = return $ Boo
+infer env (If t1 t2 t3) = do
+                      t1Type <- infer env t1
                       case t1Type of 
-                        Boo ->  do t2Type <- inferHelper env t2 depth
-                                   t3Type <- inferHelper env t3 depth
+                        Boo ->  do t2Type <- infer env t2
+                                   t3Type <- infer env t3
                                    if t2Type == t3Type then 
                                     return $ t2Type
                                    else
                                     Nothing
                         _ -> Nothing
-inferHelper (Env env) (Lmb sym t term) depth = do termType <- inferHelper (Env $ (sym, t):env) term (depth+1)
-                                                  return $ t :-> termType
-inferHelper e@(Env env) (Let sym t term) depth = do tType <- inferHelper e t (depth+1)
-                                                    termType <- inferHelper (Env $ (sym, tType):env) term (depth+1)
-                                                    return $ termType
-inferHelper env (t1 :@: t2) depth = do leftType <- inferHelper env t1 depth
-                                       rightType <- inferHelper env t2 depth
-                                       case leftType of
-                                          (l :-> r) -> if l /= rightType then
-                                                        Nothing
-                                                      else
-                                                        return $ r
-                                          _ -> Nothing
-inferHelper env (Pair u v) depth = do uType <- inferHelper env u depth
-                                      vType <- inferHelper env v depth
-                                      return $ uType :* vType
-inferHelper env (Fst t) depth = do tType <- inferHelper env t depth                              
-                                   case tType of 
-                                     (t1 :* _) -> Just t1
-                                     _ -> Nothing
-inferHelper env (Snd t) depth = do tType <- inferHelper env t depth                              
-                                   case tType of 
-                                     (_ :* t2) -> Just t2
-                                     _ -> Nothing
-                                   
+infer (Env env) (Lmb sym t term) = do termType <- infer (Env $ (sym, t):env) term
+                                      return $ t :-> termType
+infer e@(Env env) (Let sym t term) = do tType <- infer e t
+                                        termType <- infer (Env $ (sym, tType):env) term
+                                        return $ termType
+infer env (t1 :@: t2) = do  leftType <- infer env t1
+                            rightType <- infer env t2
+                            case leftType of
+                              (l :-> r) -> if l /= rightType then
+                                            Nothing
+                                          else
+                                            return $ r
+                              _ -> Nothing
+infer env (Pair u v) = do uType <- infer env u
+                          vType <- infer env v
+                          return $ uType :* vType
+infer env (Fst t) = do  tType <- infer env t                              
+                        case tType of 
+                          (t1 :* _) -> Just t1
+                          _ -> Nothing
+infer env (Snd t) = do  tType <- infer env t                              
+                        case tType of 
+                          (_ :* t2) -> Just t2
+                          _ -> Nothing
 
 infer0 :: Term -> Maybe Type
 infer0 = infer $ Env []
