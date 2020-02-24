@@ -12,7 +12,7 @@ data Term = Fls
           | Idx Int
           | Term :@: Term
           | Lmb Symb Type Term
-          deriving (Read,Show)
+          | Let Symb Term Term deriving (Show)
 
 instance Eq Term where
   Fls       == Fls         =  True
@@ -21,6 +21,7 @@ instance Eq Term where
   Idx m     == Idx m1      =  m == m1
   (u:@:w)   == (u1:@:w1)   =  u == u1 && w == w1
   Lmb _ t u == Lmb _ t1 u1 =  t == t1 && u == u1
+  Let sym t term == Let sym' t' term' = sym == sym' && t == t' && term == term'
   _         == _           =  False
 
 newtype Env = Env [(Symb,Type)]
@@ -51,7 +52,9 @@ substDB j n (Idx x) | x == j = n
 substDB j n i@(Idx x) = i
 substDB j n (t1 :@: t2) = (substDB j n t1) :@: (substDB j n t2)
 substDB j n (Lmb sym t term) = Lmb sym t newBody where
-                                newBody = (substDB (j+1) (shift 1 n) term)
+                                newBody = substDB (j+1) (shift 1 n) term
+substDB j n (Let sym t term) = Let sym t newBody where
+                                newBody = substDB (j+1) (shift 1 n) term
 
 isValue :: Term -> Bool
 isValue Tru = True
@@ -69,6 +72,9 @@ oneStep (l@(Lmb sym t term) :@: r) = do r' <- oneStep r
                                         return $ l :@: r'
 oneStep (l :@: r) = do l' <- oneStep l
                        return $ l' :@: r
+oneStep (Let sym t term) | isValue t = return $ substDB 0 t term
+oneStep (Let sym t term) = do t' <- oneStep t
+                              return $ Let sym t' term
 oneStep _ = Nothing
 
 whnf :: Term -> Term 
