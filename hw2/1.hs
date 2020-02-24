@@ -163,6 +163,14 @@ infer env (Snd t) = do  tType <- infer env t
 infer0 :: Term -> Maybe Type
 infer0 = infer $ Env []
 
+
+match :: Pat -> Term -> Maybe [(Symb,Term)]
+match (PVar s) t | isValue t = return $ [(s, t)]
+match (PPair l r) (Pair u v) = do lMatch <- (match l u) 
+                                  rMatch <- (match r v) 
+                                  return $ lMatch ++ rMatch
+match _ _ = Nothing
+
 main1 :: IO ()
 main1 = do let cSnd = Lmb "z" (Boo :* Boo) (Snd (Idx 0));
            let cCurry = Lmb "f" (Boo :* Boo :-> Boo) $ Lmb "x" Boo $ Lmb "y" Boo $ (Idx 2) :@: Pair (Idx 1) (Idx 0);
@@ -179,3 +187,7 @@ main2 = do let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1));
 main3 :: IO ()
 main3 = do let test2 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 2);
            putStrLn $ show $ substDB 0 (Idx 40) test2
+           let [pa,pb,pc,pd] = PVar <$> ["a","b","c","d"];
+           putStrLn $ show $ match (PPair pa pb) (Pair Tru Fls)
+           putStrLn $ show $ match (PPair (PPair pa pb) pc) (Pair (Pair Tru Fls) Tru)
+           putStrLn $ show $ match pa (If Tru Fls Tru)
