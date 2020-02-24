@@ -99,9 +99,12 @@ oneStep (l@(Lmb sym t term) :@: r) = do r' <- oneStep r
                                         return $ l :@: r'
 oneStep (l :@: r) = do l' <- oneStep l
                        return $ l' :@: r
-oneStep (Let sym t term) | isValue t = return $ substDB 0 t term
-oneStep (Let sym t term) = do t' <- oneStep t
-                              return $ Let sym t' term
+oneStep (Let p t term) | isValue t = do m <- match p t
+                                        return $ performSubst m term
+                                      where
+                                        performSubst m term = fst $ foldr (\(sym, term) (res, pos) -> (substDB pos term res, pos+1)) (term, 0) m
+oneStep (Let p t term) = do t' <- oneStep t
+                            return $ Let p t' term
 oneStep (Fst p@(Pair u v)) | isValue p = return $ u
 oneStep (Snd p@(Pair u v)) | isValue p = return $ v
 oneStep (Fst t) = do t' <- oneStep t
@@ -191,3 +194,7 @@ main3 = do let test2 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 2);
            putStrLn $ show $ match (PPair pa pb) (Pair Tru Fls)
            putStrLn $ show $ match (PPair (PPair pa pb) pc) (Pair (Pair Tru Fls) Tru)
            putStrLn $ show $ match pa (If Tru Fls Tru)
+           let test0 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 0);
+           putStrLn $ show $ oneStep test0
+           let test1 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 1);
+           putStrLn $ show $ oneStep test1
