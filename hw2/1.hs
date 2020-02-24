@@ -102,6 +102,9 @@ inferHelper env (If t1 t2 t3) depth = do
                         _ -> Nothing
 inferHelper (Env env) (Lmb sym t term) depth = do termType <- inferHelper (Env $ (sym, t):env) term (depth+1)
                                                   return $ t :-> termType
+inferHelper e@(Env env) (Let sym t term) depth = do tType <- inferHelper e t (depth+1)
+                                                    termType <- inferHelper (Env $ (sym, tType):env) term (depth+1)
+                                                    return $ termType
 inferHelper env (t1 :@: t2) depth = do leftType <- inferHelper env t1 depth
                                        rightType <- inferHelper env t2 depth
                                        case leftType of
