@@ -3,6 +3,7 @@ infixl 4 :@:
 infixr 3 :->
 
 data Type = Boo
+          | Nat
           | Type :-> Type
           | Type :* Type
     deriving (Read,Show,Eq)
@@ -10,13 +11,19 @@ data Type = Boo
 data Term = Fls
           | Tru
           | If Term Term Term
+          | Zero              
+          | Succ Term         
+          | Pred Term     
+          | IsZero Term       
           | Idx Int
           | Term :@: Term
           | Lmb Symb Type Term
           | Pair Term Term
           | Fst Term
           | Snd Term
-          | Let Pat Term Term deriving (Show)
+          | Let Pat Term Term 
+          | Fix Term 
+          deriving (Show)
 
 data Pat = PVar Symb
          | PPair Pat Pat deriving (Show, Eq)
@@ -58,6 +65,11 @@ shift val t = go 0 val t where
                                      size :: Pat -> Int
                                      size (PVar _) = 1
                                      size (PPair u v) = (size u) + (size v) + 1
+    go cutOff val (Succ t) = Succ $ go cutOff val t
+    go cutOff val (Pred t) = Pred $ go cutOff val t
+    go cutOff val (IsZero t) = IsZero $ go cutOff val t
+    go cutOff val (Fix t) = Fix $ go cutOff val t
+    go _ _ t = t
 
 substDB :: Int -> Term -> Term -> Term
 substDB _ _ Fls = Fls
@@ -81,12 +93,18 @@ substDB j n (Pair t1 t2) = Pair newT1 newT2 where
                               newT2 = substDB j n t2                              
 substDB j n (Fst t) = Fst $ substDB j n t
 substDB j n (Snd t) = Snd $ substDB j n t
+substDB j n (Succ t) = Succ $ substDB j n t
+substDB j n (Pred t) = Pred $ substDB j n t
+substDB j n (IsZero t) = IsZero $ substDB j n t
+substDB j n (Fix t) = Fix $ substDB j n t
+substDB _ _ t = t
 
 isValue :: Term -> Bool
 isValue Tru = True
 isValue Fls = True
 isValue (Lmb _ _ _) = True
 isValue (Pair u v) | isValue u && isValue v = True
+isValue t | isNV t = True
 isValue _ = False
 
 oneStep :: Term -> Maybe Term
@@ -116,6 +134,19 @@ oneStep (Pair u v) = case oneStep u of
                       Nothing -> case oneStep v of
                         Just v' -> Just $ Pair u v'
                         _ -> Nothing
+oneStep (Succ t) = do t' <- oneStep t
+                      return $ Succ t'
+oneStep (Pred Zero) = return $ Zero
+oneStep (Pred (Succ nv)) = return $ nv
+oneStep (Pred t) = do t' <- oneStep t
+                      return $ Pred t'
+oneStep (IsZero Zero) = return $ Tru
+oneStep (IsZero (Succ nv)) | isNV nv = return $ Fls
+oneStep (IsZero t) = do t' <- oneStep t
+                        return $ IsZero t'
+oneStep f@(Fix (Lmb sym t term)) = return $ substDB 0 f term
+oneStep (Fix t) = do t' <- oneStep t
+                     return $ Fix t'
 oneStep _ = Nothing
 
 whnf :: Term -> Term 
@@ -181,6 +212,11 @@ checkPat (PPair u v) (t1 :* t2) = do (Env uCheck) <- checkPat u t1
                                      (Env vCheck) <- checkPat v t2
                                      return $ Env $ (vCheck ++ uCheck)
 
+isNV :: Term -> Bool
+isNV Zero = True
+isNV (Succ t) = True
+isNV _ = False
+
 main1 :: IO ()
 main1 = do let cSnd = Lmb "z" (Boo :* Boo) (Snd (Idx 0));
            let cCurry = Lmb "f" (Boo :* Boo :-> Boo) $ Lmb "x" Boo $ Lmb "y" Boo $ (Idx 2) :@: Pair (Idx 1) (Idx 0);
@@ -217,3 +253,52 @@ main4 = do let [pa,pb] = PVar <$> ["a","b"];
            let pair  = Pair Tru cK;
            let ppair = PPair pa pb;
            putStrLn $ show $ infer0 $ Let ppair pair (Idx 0);
+
+one   = Succ Zero
+two   = Succ one
+three = Succ two
+four  = Succ three
+five  = Succ four
+six   = Succ five
+seven = Succ six
+eight = Succ seven
+nine  = Succ eight
+ten   = Succ nine
+
+plus_ = Lmb "f" (Nat :-> Nat :-> Nat) $ Lmb "m" Nat $ Lmb "n" Nat $ 
+  If (IsZero $ Idx 1) 
+     (Idx 0) 
+     (Succ $ Idx 2 :@: Pred (Idx 1) :@: Idx 0)
+plus = Fix plus_
+
+minus_ = Lmb "f" (Nat :-> Nat :-> Nat) $ Lmb "m" Nat $ Lmb "n" Nat $ 
+  If (IsZero $ Idx 0)
+     (Idx 1) 
+     (Pred $ Idx 2 :@: Idx 1 :@: Pred (Idx 0))
+minus = Fix minus_
+
+eq_ = Lmb "f" (Nat :-> Nat :-> Boo) $ Lmb "m" Nat $ Lmb "n" Nat $ 
+  If (IsZero $ Idx 1) 
+     (IsZero $ Idx 0) 
+     (If (IsZero $ Idx 0) 
+         (IsZero $ Idx 1) 
+         (Idx 2 :@: Pred (Idx 1) :@: Pred (Idx 0)))
+eq = Fix eq_
+
+mult_ = Lmb "f" (Nat :-> Nat :-> Nat) $ Lmb "m" Nat $ Lmb "n" Nat $ 
+  If (IsZero $ Idx 1) 
+     Zero 
+     (plus :@: Idx 0 :@: (Idx 2 :@: Pred (Idx 1) :@: Idx 0))
+mult = Fix mult_
+
+power_  = Lmb "f" (Nat :-> Nat :-> Nat) $ Lmb "m" Nat $ Lmb "n" Nat $ 
+  If (IsZero $ Idx 0) 
+     one 
+     (mult :@: Idx 1 :@: (Idx 2 :@: Idx 1 :@: Pred (Idx 0)))
+power = Fix power_          
+
+main5 :: IO ()
+main5 = do let test = minus :@: (power :@: nine :@: two) :@: (mult :@: eight :@: ten);
+           putStrLn $ show $ whnf test
+           putStrLn $ show $ whnf $ eq :@: test :@: one
+           putStrLn $ show $ whnf $ IsZero (Succ (Pred Fls))
