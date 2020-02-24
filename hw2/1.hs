@@ -1,11 +1,14 @@
 type Symb = String
 infixl 4 :@: 
 infixr 3 :->
+infixl 5 :*
+infixl 4 :+ 
 
 data Type = Boo
           | Nat
           | Type :-> Type
           | Type :* Type
+          | Type :+ Type
     deriving (Read,Show,Eq)
 
 data Term = Fls
@@ -23,6 +26,9 @@ data Term = Fls
           | Snd Term
           | Let Pat Term Term 
           | Fix Term 
+          | Inl Term Type            
+          | Inr Type Term   
+          | Case Term Symb Term Term 
           deriving (Show)
 
 data Pat = PVar Symb
@@ -69,6 +75,12 @@ shift val t = go 0 val t where
     go cutOff val (Pred t) = Pred $ go cutOff val t
     go cutOff val (IsZero t) = IsZero $ go cutOff val t
     go cutOff val (Fix t) = Fix $ go cutOff val t
+    go cutOff val (Inl term t) = Inl (go cutOff val term) t
+    go cutOff val (Inr t term) = Inr t (go cutOff val term)
+    go cutOff val (Case t1 sym t2 t3) = Case newT1 sym newT2 newT3 where
+                                          newT1 = go cutOff val t1
+                                          newT2 = go (cutOff + 1) val t2
+                                          newT3 = go (cutOff +1) val t3
     go _ _ t = t
 
 substDB :: Int -> Term -> Term -> Term
@@ -83,7 +95,8 @@ substDB j n i@(Idx x) = i
 substDB j n (t1 :@: t2) = (substDB j n t1) :@: (substDB j n t2)
 substDB j n (Lmb sym t term) = Lmb sym t newBody where
                                 newBody = substDB (j+1) (shift 1 n) term
-substDB j n (Let p t term) = Let p t newBody where
+substDB j n (Let p t term) = Let p newT newBody where
+                                newT = substDB j n t
                                 newBody = substDB (j + size p) (shift (size p) n) term
                                 size :: Pat -> Int
                                 size (PVar _) = 1
@@ -97,6 +110,12 @@ substDB j n (Succ t) = Succ $ substDB j n t
 substDB j n (Pred t) = Pred $ substDB j n t
 substDB j n (IsZero t) = IsZero $ substDB j n t
 substDB j n (Fix t) = Fix $ substDB j n t
+substDB j n (Inl term t) = Inl (substDB j n term) t
+substDB j n (Inr t term) = Inr t (substDB j n term)
+substDB j n (Case t1 sym t2 t3) = Case newT1 sym newT2 newT3 where
+                                    newT1 = substDB j n t1
+                                    newT2 = substDB (j+1) (shift 1 n) t2
+                                    newT3 = substDB (j+1) (shift 1 n) t3
 substDB _ _ t = t
 
 isValue :: Term -> Bool
@@ -105,6 +124,8 @@ isValue Fls = True
 isValue (Lmb _ _ _) = True
 isValue (Pair u v) | isValue u && isValue v = True
 isValue t | isNV t = True
+isValue (Inl v t) | isValue v = True
+isValue (Inr t v) | isValue v = True
 isValue _ = False
 
 oneStep :: Term -> Maybe Term
@@ -147,6 +168,14 @@ oneStep (IsZero t) = do t' <- oneStep t
 oneStep f@(Fix (Lmb sym t term)) = return $ substDB 0 f term
 oneStep (Fix t) = do t' <- oneStep t
                      return $ Fix t'
+oneStep (Inl term t) = do term' <- oneStep term
+                          return $ Inl term' t
+oneStep (Inr t term) = do term' <- oneStep term
+                          return $ Inr t term'
+oneStep (Case (Inl t1 t) sym t2 t3) | isValue t1 = return $ substDB 0 t1 t2
+oneStep (Case (Inr t t1) sym t2 t3) | isValue t1 = return $ substDB 0 t1 t3
+oneStep (Case t1 sym t2 t3) = do t1' <- oneStep t1                        
+                                 return $ Case t1' sym t2 t3
 oneStep _ = Nothing
 
 whnf :: Term -> Term 
