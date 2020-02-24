@@ -16,7 +16,10 @@ data Term = Fls
           | Pair Term Term
           | Fst Term
           | Snd Term
-          | Let Symb Term Term deriving (Show)
+          | Let Pat Term Term deriving (Show)
+
+data Pat = PVar Symb
+         | PPair Pat Pat deriving (Show, Eq)
 
 instance Eq Term where
   Fls       == Fls         =  True
@@ -25,7 +28,7 @@ instance Eq Term where
   Idx m     == Idx m1      =  m == m1
   (u:@:w)   == (u1:@:w1)   =  u == u1 && w == w1
   Lmb _ t u == Lmb _ t1 u1 =  t == t1 && u == u1
-  Let sym t term == Let sym' t' term' = sym == sym' && t == t' && term == term'
+  Let p t term == Let p' t' term' = p == p' && t == t' && term == term'
   _         == _           =  False
 
 newtype Env = Env [(Symb,Type)]
@@ -49,6 +52,12 @@ shift val t = go 0 val t where
                                   newSe = go cutOff val se
     go cutOff val (Fst term) = Fst $ go cutOff val term
     go cutOff val (Snd term) = Snd $ go cutOff val term
+    go cutOff val (Let p t term) = let newTerm = go (1 + (size p)) val term in
+                                     Let p t newTerm
+                                   where 
+                                     size :: Pat -> Int
+                                     size (PVar _) = 1
+                                     size (PPair u v) = (size u) + (size v) + 1
 
 substDB :: Int -> Term -> Term -> Term
 substDB _ _ Fls = Fls
@@ -62,8 +71,11 @@ substDB j n i@(Idx x) = i
 substDB j n (t1 :@: t2) = (substDB j n t1) :@: (substDB j n t2)
 substDB j n (Lmb sym t term) = Lmb sym t newBody where
                                 newBody = substDB (j+1) (shift 1 n) term
-substDB j n (Let sym t term) = Let sym t newBody where
-                                newBody = substDB (j+1) (shift 1 n) term
+substDB j n (Let p t term) = Let p t newBody where
+                                newBody = substDB (j + size p) (shift (size p) n) term
+                                size :: Pat -> Int
+                                size (PVar _) = 1
+                                size (PPair u v) = (size u) + (size v)
 substDB j n (Pair t1 t2) = Pair newT1 newT2 where
                               newT1 = substDB j n t1
                               newT2 = substDB j n t2                              
@@ -125,9 +137,9 @@ infer env (If t1 t2 t3) = do
                         _ -> Nothing
 infer (Env env) (Lmb sym t term) = do termType <- infer (Env $ (sym, t):env) term
                                       return $ t :-> termType
-infer e@(Env env) (Let sym t term) = do tType <- infer e t
-                                        termType <- infer (Env $ (sym, tType):env) term
-                                        return $ termType
+-- infer e@(Env env) (Let p t term) = do   tType <- infer e t
+                                        -- termType <- infer (Env $ (sym, tType):env) term
+                                        -- return $ termType
 infer env (t1 :@: t2) = do  leftType <- infer env t1
                             rightType <- infer env t2
                             case leftType of
@@ -163,3 +175,7 @@ main2 = do let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1));
            putStrLn $ show $ infer0 (cUnCurry :@: cK)
            putStrLn $ show $ infer0 (cUnCurry :@: cK :@: Pair Fls Tru)
            putStrLn $ show $ infer0 (cUnCurry :@: cK :@: Fls)
+
+main3 :: IO ()
+main3 = do let test2 = Let (PPair (PVar "a") (PVar "b")) (Pair Tru Fls) (Idx 2);
+           putStrLn $ show $ substDB 0 (Idx 40) test2
