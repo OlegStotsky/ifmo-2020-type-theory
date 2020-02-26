@@ -35,14 +35,25 @@ data Pat = PVar Symb
          | PPair Pat Pat deriving (Show, Eq)
 
 instance Eq Term where
-  Fls       == Fls         =  True
-  Tru       == Tru         =  True
-  If b u w  == If b1 u1 w1 =  b == b1 && u == u1 && w == w1
-  Idx m     == Idx m1      =  m == m1
-  (u:@:w)   == (u1:@:w1)   =  u == u1 && w == w1
-  Lmb _ t u == Lmb _ t1 u1 =  t == t1 && u == u1
-  Let p t term == Let p' t' term' = p == p' && t == t' && term == term'
-  _         == _           =  False
+  Fls       == Fls                 =  True
+  Tru       == Tru                 =  True
+  If b u w  == If b1 u1 w1         =  b == b1 && u == u1 && w == w1
+  Zero      == Zero                =  True
+  Succ u    == Succ u1             =  u == u1 
+  Pred u    == Pred u1             =  u == u1
+  IsZero u  == IsZero u1           =  u == u1
+  Idx m     == Idx m1              =  m == m1
+  (u:@:w)   == (u1:@:w1)           =  u == u1 && w == w1
+  Lmb _ t u == Lmb _ t1 u1         =  t == t1 && u == u1
+  Let p u w == Let p1 u1 w1        =  p == p1 && u == u1 && w == w1
+  Pair u w  == Pair u1 w1          =  u == u1 && w == w1
+  Fst z     == Fst z1              =  z == z1
+  Snd z     == Snd z1              =  z == z1
+  Fix u     == Fix u1              =  u == u1
+  Inl u t   == Inl u1 t1           =  u == u1 &&  t == t1    
+  Inr t u   == Inr t1 u1           =  t == t1 && u == u1   
+  Case u _ t s == Case u1 _ t1 s1  =  u == u1 && t == t1 && s == s1 
+  _         == _                   =  False
 
 newtype Env = Env [(Symb,Type)]
   deriving (Read,Show,Eq)
@@ -65,12 +76,13 @@ shift val t = go 0 val t where
                                   newSe = go cutOff val se
     go cutOff val (Fst term) = Fst $ go cutOff val term
     go cutOff val (Snd term) = Snd $ go cutOff val term
-    go cutOff val (Let p t term) = let newTerm = go (1 + (size p)) val term in
-                                     Let p t newTerm
+    go cutOff val (Let p t term) = let newTerm = go (cutOff + (size p)) val term in
+                                      let newT = go cutOff val t in
+                                     Let p newT newTerm
                                    where 
                                      size :: Pat -> Int
                                      size (PVar _) = 1
-                                     size (PPair u v) = (size u) + (size v) + 1
+                                     size (PPair u v) = (size u) + (size v)
     go cutOff val (Succ t) = Succ $ go cutOff val t
     go cutOff val (Pred t) = Pred $ go cutOff val t
     go cutOff val (IsZero t) = IsZero $ go cutOff val t
@@ -150,15 +162,14 @@ oneStep (Fst t) = do t' <- oneStep t
                      return $ Fst t'
 oneStep (Snd t) = do t' <- oneStep t
                      return $ Snd t'
-oneStep (Pair u v) = case oneStep u of
-                      Just u' -> Just $ Pair u' v
-                      Nothing -> case oneStep v of
-                        Just v' -> Just $ Pair u v'
-                        _ -> Nothing
+oneStep (Pair u v) | not (isValue u) = do u' <- oneStep u
+                                          return $ Pair u' v
+oneStep (Pair u v) | (isValue u) = do v' <- oneStep v
+                                      return $ Pair u v'                     
 oneStep (Succ t) = do t' <- oneStep t
                       return $ Succ t'
 oneStep (Pred Zero) = return $ Zero
-oneStep (Pred (Succ nv)) = return $ nv
+oneStep (Pred (Succ nv)) | isNV nv = return $ nv
 oneStep (Pred t) = do t' <- oneStep t
                       return $ Pred t'
 oneStep (IsZero Zero) = return $ Tru
@@ -239,6 +250,19 @@ infer env (Snd t) = do  tType <- infer env t
                         case tType of 
                           (_ :* t2) -> Just t2
                           _ -> Nothing
+infer env (Inl term s) = do t <- infer env term
+                            return $ t :+ s
+infer env (Inr t term) = do s <- infer env term
+                            return $ t :+ s
+infer e@(Env env) (Case t1 sym t2 t3) = do t1Type <- infer e t1
+                                           case t1Type of 
+                                              (s :+ t) -> do  t2Type <- infer (Env $ (sym, s) : env) t2
+                                                              t3Type <- infer (Env $ (sym, t) : env) t3
+                                                              if t2Type /= t3Type then 
+                                                                Nothing
+                                                              else 
+                                                                return $ t2Type
+                                              _ -> Nothing
 
 infer0 :: Term -> Maybe Type
 infer0 = infer $ Env []
@@ -246,9 +270,9 @@ infer0 = infer $ Env []
 
 match :: Pat -> Term -> Maybe [(Symb,Term)]
 match (PVar s) t | isValue t = return $ [(s, t)]
-match (PPair l r) (Pair u v) = do lMatch <- (match l u) 
-                                  rMatch <- (match r v) 
-                                  return $ lMatch ++ rMatch
+match (PPair l r) (Pair u v) | isValue u && isValue v = do lMatch <- (match l u) 
+                                                           rMatch <- (match r v) 
+                                                           return $ lMatch ++ rMatch
 match _ _ = Nothing
 
 
@@ -257,10 +281,11 @@ checkPat (PVar s) t = return $ Env $ [(s, t)]
 checkPat (PPair u v) (t1 :* t2) = do (Env uCheck) <- checkPat u t1
                                      (Env vCheck) <- checkPat v t2
                                      return $ Env $ (vCheck ++ uCheck)
+checkPat _ _ = Nothing
 
 isNV :: Term -> Bool
 isNV Zero = True
-isNV (Succ t) = True
+isNV (Succ t) | isNV t = True
 isNV _ = False
 
 main1 :: IO ()
