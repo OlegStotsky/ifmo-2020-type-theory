@@ -4,45 +4,56 @@ import           Data.List  (find, findIndex)
 import           Data.Maybe
 
 type Symb = String
+
 infix 1 <:
-infixl 4 :@: 
+
+infixl 4 :@:
+
 infixr 3 :->
 
-data Type = Boo
-          | Type :-> Type
-          | TRcd [(Symb,Type)] 
-          | Top
-    deriving (Read,Show,Eq)
+infixl 4 \/
 
-data Pat = PVar Symb
-         | PRcd [(Symb,Pat)] 
-    deriving (Read,Show,Eq)
+infix 5 /\
 
-data Term = Fls
-          | Tru
-          | If Term Term Term
-          | Idx Int
-          | Term :@: Term
-          | Lmb Symb Type Term
-          | Let Pat Term Term
-          | Rcd [(Symb,Term)]
-          | Prj Symb Term
-          deriving (Read,Show)
+data Type
+  = Boo
+  | Type :-> Type
+  | TRcd [(Symb, Type)]
+  | Top
+  deriving (Read, Show, Eq)
+
+data Pat
+  = PVar Symb
+  | PRcd [(Symb, Pat)]
+  deriving (Read, Show, Eq)
+
+data Term
+  = Fls
+  | Tru
+  | If Term Term Term
+  | Idx Int
+  | Term :@: Term
+  | Lmb Symb Type Term
+  | Let Pat Term Term
+  | Rcd [(Symb, Term)]
+  | Prj Symb Term
+  deriving (Read, Show)
 
 instance Eq Term where
-  Fls       == Fls          =  True
-  Tru       == Tru          =  True
-  If b u w  == If b1 u1 w1  =  b == b1 && u == u1 && w == w1
-  Idx m     == Idx m1       =  m == m1
-  (u:@:w)   == (u1:@:w1)    =  u == u1 && w == w1
-  Lmb _ t u == Lmb _ t1 u1  =  t == t1 && u == u1
-  Let p u w == Let p1 u1 w1 =  p == p1 && u == u1 && w == w1
-  Rcd xs    == Rcd xs1      =  xs == xs1
-  Prj l u   == Prj l1 u1    =  l == l1 && u == u1
-  _         == _            =  False
+  Fls == Fls = True
+  Tru == Tru = True
+  If b u w == If b1 u1 w1 = b == b1 && u == u1 && w == w1
+  Idx m == Idx m1 = m == m1
+  (u :@: w) == (u1 :@: w1) = u == u1 && w == w1
+  Lmb _ t u == Lmb _ t1 u1 = t == t1 && u == u1
+  Let p u w == Let p1 u1 w1 = p == p1 && u == u1 && w == w1
+  Rcd xs == Rcd xs1 = xs == xs1
+  Prj l u == Prj l1 u1 = l == l1 && u == u1
+  _ == _ = False
 
-newtype Env = Env [(Symb,Type)]
-  deriving (Read,Show,Eq)
+newtype Env =
+  Env [(Symb, Type)]
+  deriving (Read, Show, Eq)
 
 shift :: Int -> Term -> Term
 shift val t = go 0 val t
@@ -179,24 +190,22 @@ checkPat (PRcd xs) (TRcd ys) =
    in if not allSymbsFound
         then Nothing
         else let x = [checkPat t t' | (sym, t) <- xs, (sym', t') <- ys, sym == sym']
-              in if length x < length xs || any (== Nothing) x
+              in if length x < length xs || elem Nothing x
                    then Nothing
-                   else (\xs -> Env $ reverse $ concat $ (\(Env env) -> reverse $ env) <$> xs) <$> sequence x
+                   else (\xs -> Env $ reverse $ concat $ (\(Env env) -> reverse env) <$> xs) <$> sequence x
 checkPat _ _ = Nothing
 
 infer :: Env -> Term -> Maybe Type
 infer (Env env) (Idx x) = return $ snd $ env !! x
-infer env Tru = return $ Boo
-infer env Fls = return $ Boo
+infer env Tru = return Boo
+infer env Fls = return Boo
 infer env (If t1 t2 t3) = do
   t1Type <- infer env t1
   case t1Type of
     Boo -> do
       t2Type <- infer env t2
       t3Type <- infer env t3
-      if t2Type == t3Type
-        then return $ t2Type
-        else Nothing
+      return $ t2Type \/ t3Type
     _ -> Nothing
 infer (Env env) (Lmb sym t term) = do
   termType <- infer (Env $ (sym, t) : env) term
@@ -206,7 +215,7 @@ infer e@(Env env) (Let p t term) = do
   (Env newEnv) <- checkPat p tType
   infer (Env $ newEnv ++ env) term
 infer e@(Env env) (Rcd xs) =
-  if any (== Nothing) inferredTypes
+  if Nothing `elem` inferredTypes
     then Nothing
     else Just $ TRcd $ zip (fst <$> xs) (fromJust <$> inferredTypes)
   where
@@ -223,39 +232,92 @@ infer env (t1 :@: t2) = do
   rightType <- infer env t2
   case leftType of
     (l :-> r) ->
-      if l /= rightType
+      if not (rightType <: l)
         then Nothing
-        else return $ r
+        else return r
     _ -> Nothing
 
 infer0 :: Term -> Maybe Type
 infer0 = infer $ Env []
 
+(<:) :: Type -> Type -> Bool
+_ <: Top = True
+(s :-> t) <: (s' :-> t') = isContraVariant && isCoVariant
+  where
+    isContraVariant = s' <: s
+    isCoVariant = t <: t'
+(TRcd xs) <: (TRcd ys) =
+  let allSymbsFound = and [any (\(sym, _) -> sym == sym') xs | (sym', _) <- ys]
+   in (allSymbsFound && and [t <: t' | (s, t) <- xs, (s', t') <- ys, s == s'])
+Boo <: Boo = True
+_ <: _ = False
 
+(\/) :: Type -> Type -> Type
+Boo \/ Boo = Boo
+s@(s1 :-> s2) \/ t@(t1 :-> t2) =
+  case helper s t of
+    Just t -> t
+    _      -> Top
+  where
+    helper (s1 :-> s2) (t1 :-> t2) = do
+      m <- s1 /\ t1
+      let j = s2 \/ t2
+      return $ m :-> j
+(TRcd xs) \/ (TRcd ys) = TRcd $ [(s, t \/ t') | (s, t) <- xs, (s', t') <- ys, s == s']
+t1 \/ t2
+  | t1 <: t2 = t2
+t1 \/ t2
+  | t2 <: t1 = t1
+_ \/ _ = Top
+
+(/\) :: Type -> Type -> Maybe Type
+t /\ Top = return $ t
+Top /\ t = return $ t
+Boo /\ Boo = return $ Boo
+s@(s1 :-> s2) /\ t@(t1 :-> t2) = do
+  let m = s1 \/ t1
+  j <- s2 /\ t2
+  return $ m :-> j
+(TRcd xs) /\ (TRcd ys) = do
+  let both = [(s, t /\ t') | (s, t) <- xs, (s', t') <- ys, s == s']
+  let onlyXS = [(s, t) | (s, t) <- xs, not $ any (\(s', _) -> s == s') both]
+  let onlyYS = [(s, t) | (s, t) <- ys, not $ any (\(s', _) -> s == s') both]
+  if Nothing `elem` (snd <$> both)
+    then Nothing
+    else return $ TRcd $ onlyXS ++ ((\m -> fromJust <$> m) <$> both) ++ onlyYS
+t1 /\ t2
+  | t1 <: t2 = Just $ t1
+t1 /\ t2
+  | t2 <: t1 = Just $ t2
+_ /\ _ = Nothing
 
 main' :: IO ()
 main' = do
-  let pat = PRcd [("lx", PVar "px"), ("ly", PVar "py")]
-  let rec = Rcd [("lx", Tru), ("ly", Fls)]
-  putStrLn $ show $ match pat rec
-  putStrLn $ show $ oneStep $ Let pat rec $ If Tru (Idx 1) (Idx 0)
-  putStrLn $ show $ whnf $ Let pat rec $ If Tru (Idx 1) (Idx 0)
+  let rec1 = TRcd [("lx", Boo), ("ly", Boo :-> Boo)]
+  let rec2 = TRcd [("lz", TRcd []), ("ly", Boo :-> Boo), ("lx", Boo)]
+  let rec3 = TRcd [("lz", Top), ("ly", Boo :-> Boo), ("lx", Top)]
+  print (rec2 <: rec1)
+  print (rec1 :-> Boo <: rec2 :-> Boo)
+  print (rec2 <: rec3)
+  print (rec1 <: rec3)
+  print (rec3 <: rec1)
 
 main'' :: IO ()
 main'' = do
-  let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1))
-  let rec = Rcd [("lB", Tru), ("lK", cK)]
-  let pat = PRcd [("lB", PVar "x"), ("lK", PVar "y")]
-  putStrLn $ show $ infer0 rec
-  putStrLn $ show $ checkPat pat <$> infer0 rec
-  putStrLn $ show $ infer0 $ Let pat rec (Idx 0)
-  putStrLn $ show $ infer0 $ Let pat rec (Idx 1)
+  let tr1 = TRcd [("la", Boo), ("lb", Boo :-> Boo)]
+  let tr2 = TRcd [("lb", Boo :-> Boo), ("lc", TRcd [])]
+  let tr3 = TRcd [("lb", Boo), ("lc", TRcd [])]
+  putStrLn $ show $ tr1 \/ tr2
+  putStrLn $ show $ tr1 /\ tr2
+  putStrLn $ show $ tr1 \/ tr3
+  putStrLn $ show $ tr1 /\ tr3
 
 main''' :: IO ()
 main''' = do
-  let cK = Lmb "x" Boo (Lmb "y" Boo (Idx 1))
-  let rec = Rcd [("lK", cK), ("lB1", Tru), ("lB2", Fls)]
-  let pat = PRcd [("lB2", PVar "x"), ("lK", PVar "y")]
-  putStrLn $ show $ infer0 rec
-  putStrLn $ show $ checkPat pat <$> infer0 rec
-  putStrLn $ show $ infer0 $ Let pat rec (Idx 1)
+  let type1 = TRcd [("la",Boo),("lb",Boo :-> Boo)]
+  let type2 = TRcd [("lb",Boo :-> Boo), ("lc",Boo :-> Boo :-> Boo)]
+  let body1 = Rcd [("lb",Prj "lb" (Idx 0)),("lc",Lmb "x" Boo $ Prj "lb" (Idx 1))]
+  let body2 = Rcd [("lb",Prj "lb" (Idx 0)),("la",Prj "lb" (Idx 0) :@: Tru)]
+  let func1 = Lmb "x" type1 body1
+  let func2 = Lmb "y" type2 body2
+  putStrLn $ show $ infer0 func1
